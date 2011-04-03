@@ -2,7 +2,7 @@ module Paperclip
   # Handles thumbnailing images that are uploaded.
   class Thumbnail < Processor
 
-    attr_accessor :current_geometry, :target_geometry, :format, :whiny, :convert_options, :source_file_options
+    attr_accessor :current_geometry, :target_geometry, :format, :whiny, :convert_options, :before_transformation_convert_options, :source_file_options
 
     # Creates a Thumbnail object set to work on the +file+ given. It
     # will attempt to transform the image into one defined by +target_geometry+
@@ -20,10 +20,12 @@ module Paperclip
       @current_geometry    = Geometry.from_file @file
       @source_file_options = options[:source_file_options]
       @convert_options     = options[:convert_options]
+      @before_transformation_convert_options = options[:before_transformation_convert_options]
       @whiny               = options[:whiny].nil? ? true : options[:whiny]
       @format              = options[:format]
 
       @source_file_options = @source_file_options.split(/\s+/) if @source_file_options.respond_to?(:split)
+      @before_transformation_convert_options = @before_transformation_convert_options.split(/\s+/) if @before_transformation_convert_options.respond_to?(:split)
       @convert_options     = @convert_options.split(/\s+/)     if @convert_options.respond_to?(:split)
 
       @current_format      = File.extname(@file.path)
@@ -52,6 +54,7 @@ module Paperclip
         parameters = []
         parameters << source_file_options
         parameters << ":source"
+        parameters << before_transformation_convert_options
         parameters << transformation_command
         parameters << convert_options
         parameters << ":dest"
