@@ -58,9 +58,9 @@ module Paperclip
 
         parameters = parameters.flatten.compact.join(" ").strip.squeeze(" ")
 
-        dst = File.expand_path dst.path
-        dst = "#{@format}:#{dst}" if @format
-        success = Paperclip.run("convert", parameters, :source => "#{File.expand_path(src.path)}[0]", :dest => dst)
+        dst_param = File.expand_path dst.path
+        dst_param = "#{@format}:#{dst_param}" if @format
+        success = Paperclip.run("convert", parameters, :source => "#{File.expand_path(src.path)}[0]", :dest => dst_param)
       rescue PaperclipCommandLineError => e
         raise PaperclipError, "There was an error processing the thumbnail for #{@basename}" if @whiny
       end
