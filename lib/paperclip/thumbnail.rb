@@ -45,7 +45,7 @@ module Paperclip
     # that contains the new image.
     def make
       src = @file
-      dst = Tempfile.new([@basename, @format ? ".#{@format}" : ''])
+      dst = Tempfile.new(@basename)
       dst.binmode
 
       begin
@@ -58,7 +58,9 @@ module Paperclip
 
         parameters = parameters.flatten.compact.join(" ").strip.squeeze(" ")
 
-        success = Paperclip.run("convert", parameters, :source => "#{File.expand_path(src.path)}[0]", :dest => File.expand_path(dst.path))
+        dst = File.expand_path dst.path
+        dst = "#{@format}:#{dst}" if @format
+        success = Paperclip.run("convert", parameters, :source => "#{File.expand_path(src.path)}[0]", :dest => dst)
       rescue PaperclipCommandLineError => e
         raise PaperclipError, "There was an error processing the thumbnail for #{@basename}" if @whiny
       end
