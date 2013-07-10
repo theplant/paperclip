@@ -83,6 +83,12 @@ module Paperclip
             :access_key_id => @s3_credentials[:access_key_id],
             :secret_access_key => @s3_credentials[:secret_access_key]
           ))
+          if @s3_credentials[:region].present?
+            begin
+              AWS::S3::DEFAULT_HOST.replace "s3-#{@s3_credentials[:region]}.amazonaws.com"
+            rescue
+            end
+          end
         end
         Paperclip.interpolates(:s3_alias_url) do |attachment, style|
           path = "/#{attachment.path(style)}"
