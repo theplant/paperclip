@@ -1,8 +1,7 @@
-source "http://rubygems.org"
-gem "shoulda"
-gem "mocha"
-gem "rake"
-gem "ruby-debug"
-gem "aws-s3", :require => "aws/s3"
-gem "sqlite3-ruby", "~>1.3.0"
-gem "appraisal"
+source "https://rubygems.org"
+
+gemspec
+
+gem "jruby-openssl", :platform => :jruby
+gem "activerecord-jdbcsqlite3-adapter", :platform => :jruby
+gem "sqlite3", :platform => :ruby

@@ -1,13 +1,19 @@
 require 'rubygems'
 require 'tempfile'
+require 'pathname'
 require 'test/unit'
-
-require 'shoulda'
-require 'mocha'
-
 require 'active_record'
 require 'active_record/version'
 require 'active_support'
+require 'active_support/core_ext'
+require 'shoulda'
+require 'mocha/setup'
+require 'bourne'
+require 'shoulda/context'
+require 'mime/types'
+require 'pathname'
+require 'ostruct'
+require 'pry'
 
 puts "Testing against version #{ActiveRecord::VERSION::STRING}"
 
@@ -19,19 +25,15 @@ rescue LoadError => e
   puts "debugger disabled"
 end
 
-ROOT = File.join(File.dirname(__FILE__), '..')
-
-def silence_warnings
-  old_verbose, $VERBOSE = $VERBOSE, nil
-  yield
-ensure
-  $VERBOSE = old_verbose
-end
+ROOT = Pathname(File.expand_path(File.join(File.dirname(__FILE__), '..')))
 
 class Test::Unit::TestCase
   def setup
     silence_warnings do
-      Object.const_set(:Rails, stub('Rails', :root => ROOT, :env => 'test'))
+      Object.const_set(:Rails, stub('Rails'))
+      Rails.stubs(:root).returns(Pathname.new(ROOT).join('tmp'))
+      Rails.stubs(:env).returns('test')
+      Rails.stubs(:const_defined?).with(:Railtie).returns(false)
     end
   end
 end
@@ -45,14 +47,34 @@ require './shoulda_macros/paperclip'
 
 FIXTURES_DIR = File.join(File.dirname(__FILE__), "fixtures")
 config = YAML::load(IO.read(File.dirname(__FILE__) + '/database.yml'))
-ActiveRecord::Base.logger = ActiveSupport::BufferedLogger.new(File.dirname(__FILE__) + "/debug.log")
+ActiveRecord::Base.logger = Logger.new(File.dirname(__FILE__) + "/debug.log")
 ActiveRecord::Base.establish_connection(config['test'])
+Paperclip.options[:logger] = ActiveRecord::Base.logger
+
+def using_protected_attributes?
+  ActiveRecord::VERSION::MAJOR < 4
+end
+
+def require_everything_in_directory(directory_name)
+  Dir[File.join(File.dirname(__FILE__), directory_name, '*')].each do |f|
+    require f
+  end
+end
+
+require_everything_in_directory('support')
 
 def reset_class class_name
   ActiveRecord::Base.send(:include, Paperclip::Glue)
   Object.send(:remove_const, class_name) rescue nil
   klass = Object.const_set(class_name, Class.new(ActiveRecord::Base))
-  klass.class_eval{ include Paperclip::Glue }
+
+  klass.class_eval do
+    include Paperclip::Glue
+  end
+
+  klass.reset_column_information
+  klass.connection_pool.clear_table_cache!(klass.table_name) if klass.connection_pool.respond_to?(:clear_table_cache!)
+  klass.connection.schema_cache.clear_table_cache!(klass.table_name) if klass.connection.respond_to?(:schema_cache)
   klass
 end
 
@@ -67,6 +89,7 @@ end
 
 def rebuild_model options = {}
   ActiveRecord::Base.connection.create_table :dummies, :force => true do |table|
+    table.column :title, :string
     table.column :other, :string
     table.column :avatar_file_name, :string
     table.column :avatar_content_type, :string
@@ -78,12 +101,16 @@ def rebuild_model options = {}
 end
 
 def rebuild_class options = {}
-  ActiveRecord::Base.send(:include, Paperclip::Glue)
-  Object.send(:remove_const, "Dummy") rescue nil
-  Object.const_set("Dummy", Class.new(ActiveRecord::Base))
-  Dummy.class_eval do
-    include Paperclip::Glue
-    has_attached_file :avatar, options
+  reset_class("Dummy").tap do |klass|
+    klass.has_attached_file :avatar, options
+    Paperclip.reset_duplicate_clash_check!
+  end
+end
+
+def rebuild_meta_class_of obj, options = {}
+  (class << obj; self; end).tap do |metaklass|
+    metaklass.has_attached_file :avatar, options
+    Paperclip.reset_duplicate_clash_check!
   end
 end
 
@@ -102,9 +129,12 @@ class FakeModel
   def run_paperclip_callbacks name, *args
   end
 
+  def valid?
+    errors.empty?
+  end
 end
 
-def attachment options
+def attachment(options={})
   Paperclip::Attachment.new(:avatar, FakeModel.new, options)
 end
 
@@ -142,5 +172,39 @@ def with_exitstatus_returning(code)
     yield
   ensure
     `ruby -e 'exit #{saved_exitstatus.to_i}'`
+  end
+end
+
+def fixture_file(filename)
+  File.join(File.dirname(__FILE__), 'fixtures', filename)
+end
+
+def assert_success_response(url)
+  Net::HTTP.get_response(URI.parse(url)) do |response|
+    assert_equal "200", response.code,
+      "Expected HTTP response code 200, got #{response.code}"
+  end
+end
+
+def assert_not_found_response(url)
+  Net::HTTP.get_response(URI.parse(url)) do |response|
+    assert_equal "404", response.code,
+      "Expected HTTP response code 404, got #{response.code}"
+  end
+end
+
+def assert_file_exists(path)
+  assert File.exists?(path), %(Expect "#{path}" to be exists.)
+end
+
+def assert_file_not_exists(path)
+  assert !File.exists?(path), %(Expect "#{path}" to not exists.)
+end
+
+def assert_frame_dimensions(range, frames)
+  frames.each_with_index do |frame, frame_index|
+    frame.split('x').each_with_index do |dimension, dimension_index |
+      assert range.include?(dimension.to_i), "Frame #{frame_index}[#{dimension_index}] should have been within #{range.inspect}, but was #{dimension}"
+    end
   end
 end

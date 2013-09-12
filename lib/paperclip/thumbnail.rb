@@ -2,7 +2,11 @@ module Paperclip
   # Handles thumbnailing images that are uploaded.
   class Thumbnail < Processor
 
-    attr_accessor :current_geometry, :target_geometry, :format, :whiny, :convert_options, :before_transformation_convert_options, :source_file_options
+    attr_accessor :current_geometry, :target_geometry, :format, :whiny, :convert_options,
+                  :source_file_options, :animated, :auto_orient, :before_transformation_convert_options
+
+    # List of formats that we need to preserve animation
+    ANIMATED_FORMATS = %w(gif)
 
     # Creates a Thumbnail object set to work on the +file+ given. It
     # will attempt to transform the image into one defined by +target_geometry+
@@ -10,19 +14,35 @@ module Paperclip
     # unless specified. Thumbnail creation will raise no errors unless
     # +whiny+ is true (which it is, by default. If +convert_options+ is
     # set, the options will be appended to the convert command upon image conversion
-    def initialize file, options = {}, attachment = nil
+    #
+    # Options include:
+    #
+    #   +geometry+ - the desired width and height of the thumbnail (required)
+    #   +file_geometry_parser+ - an object with a method named +from_file+ that takes an image file and produces its geometry and a +transformation_to+. Defaults to Paperclip::Geometry
+    #   +string_geometry_parser+ - an object with a method named +parse+ that takes a string and produces an object with +width+, +height+, and +to_s+ accessors. Defaults to Paperclip::Geometry
+    #   +source_file_options+ - flags passed to the +convert+ command that influence how the source file is read
+    #   +convert_options+ - flags passed to the +convert+ command that influence how the image is processed
+    #   +whiny+ - whether to raise an error when processing fails. Defaults to true
+    #   +format+ - the desired filename extension
+    #   +animated+ - whether to merge all the layers in the image. Defaults to true
+    def initialize(file, options = {}, attachment = nil)
       super
 
-      geometry             = options[:geometry]
+      geometry             = options[:geometry] # this is not an option
       @file                = file
       @crop                = geometry[-1,1] == '#'
-      @target_geometry     = Geometry.parse geometry
-      @current_geometry    = Geometry.from_file @file
+      @target_geometry     = (options[:string_geometry_parser] || Geometry).parse(geometry)
+      @current_geometry    = (options[:file_geometry_parser] || Geometry).from_file(@file)
       @source_file_options = options[:source_file_options]
       @convert_options     = options[:convert_options]
       @before_transformation_convert_options = options[:before_transformation_convert_options]
       @whiny               = options[:whiny].nil? ? true : options[:whiny]
       @format              = options[:format]
+      @animated            = options[:animated].nil? ? true : options[:animated]
+      @auto_orient         = options[:auto_orient].nil? ? true : options[:auto_orient]
+      if @auto_orient && @current_geometry.respond_to?(:auto_orient)
+        @current_geometry.auto_orient
+      end
 
       @source_file_options = @source_file_options.split(/\s+/) if @source_file_options.respond_to?(:split)
       @before_transformation_convert_options = @before_transformation_convert_options.split(/\s+/) if @before_transformation_convert_options.respond_to?(:split)
@@ -30,7 +50,6 @@ module Paperclip
 
       @current_format      = File.extname(@file.path)
       @basename            = File.basename(@file.path, @current_format)
-
     end
 
     # Returns true if the +target_geometry+ is meant to crop.
@@ -63,9 +82,11 @@ module Paperclip
 
         dst_param = File.expand_path dst.path
         dst_param = "#{@format}:#{dst_param}" if @format
-        success = Paperclip.run("convert", parameters, :source => "#{File.expand_path(src.path)}[0]", :dest => dst_param)
-      rescue PaperclipCommandLineError => e
-        raise PaperclipError, "There was an error processing the thumbnail for #{@basename}" if @whiny
+        success = convert(parameters, :source => "#{File.expand_path(src.path)}#{'[0]' unless animated?}", :dest => dst_param)
+      rescue Cocaine::ExitStatusError => e
+        raise Paperclip::Error, "There was an error processing the thumbnail for #{@basename}" if @whiny
+      rescue Cocaine::CommandNotFoundError => e
+        raise Paperclip::Errors::CommandNotFoundError.new("Could not run the `convert` command. Please install ImageMagick.")
       end
 
       dst
@@ -76,9 +97,28 @@ module Paperclip
     def transformation_command
       scale, crop = @current_geometry.transformation_to(@target_geometry, crop?)
       trans = []
+      trans << "-coalesce" if animated?
+      trans << "-auto-orient" if auto_orient
       trans << "-resize" << %["#{scale}"] unless scale.nil? || scale.empty?
       trans << "-crop" << %["#{crop}"] << "+repage" if crop
+      trans << '-layers "optimize"' if animated?
       trans
+    end
+
+    protected
+
+    # Return true if the format is animated
+    def animated?
+      @animated && (ANIMATED_FORMATS.include?(@format.to_s) || @format.blank?)  && identified_as_animated?
+    end
+
+    # Return true if ImageMagick's +identify+ returns an animated format
+    def identified_as_animated?
+      ANIMATED_FORMATS.include? identify("-format %m :file", :file => "#{@file.path}[0]").to_s.downcase.strip
+    rescue Cocaine::ExitStatusError => e
+      raise Paperclip::Error, "There was an error running `identify` for #{@basename}" if @whiny
+    rescue Cocaine::CommandNotFoundError => e
+      raise Paperclip::Errors::CommandNotFoundError.new("Could not run the `identify` command. Please install ImageMagick.")
     end
   end
 end

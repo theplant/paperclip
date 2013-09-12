@@ -49,6 +49,30 @@ class GeometryTest < Test::Unit::TestCase
       assert_nil @geo.modifier
     end
 
+    should "recognize an EXIF orientation and not rotate with auto_orient if not necessary" do
+      geo = Paperclip::Geometry.new(:width => 1024, :height => 768, :orientation => 1)
+      assert geo
+      assert_equal 1024, geo.width
+      assert_equal 768, geo.height
+
+      geo.auto_orient
+
+      assert_equal 1024, geo.width
+      assert_equal 768, geo.height
+    end
+
+    should "recognize an EXIF orientation and rotate with auto_orient if necessary" do
+      geo = Paperclip::Geometry.new(:width => 1024, :height => 768, :orientation => 6)
+      assert geo
+      assert_equal 1024, geo.width
+      assert_equal 768, geo.height
+
+      geo.auto_orient
+
+      assert_equal 768, geo.width
+      assert_equal 1024, geo.height
+    end
+
     should "treat x and X the same in geometries" do
       @lower = Paperclip::Geometry.parse("123x456")
       @upper = Paperclip::Geometry.parse("123X456")
@@ -101,23 +125,60 @@ class GeometryTest < Test::Unit::TestCase
     end
 
     should "be generated from a file" do
-      file = File.join(File.dirname(__FILE__), "fixtures", "5k.png")
+      file = fixture_file("5k.png")
       file = File.new(file, 'rb')
       assert_nothing_raised{ @geo = Paperclip::Geometry.from_file(file) }
-      assert @geo.height > 0
-      assert @geo.width > 0
+      assert_equal 66, @geo.height
+      assert_equal 434, @geo.width
     end
 
     should "be generated from a file path" do
-      file = File.join(File.dirname(__FILE__), "fixtures", "5k.png")
+      file = fixture_file("5k.png")
       assert_nothing_raised{ @geo = Paperclip::Geometry.from_file(file) }
-      assert @geo.height > 0
-      assert @geo.width > 0
+      assert_equal 66, @geo.height
+      assert_equal 434, @geo.width
+    end
+
+    should 'calculate an EXIF-rotated image dimensions from a path' do
+      file = fixture_file("rotated.jpg")
+      assert_nothing_raised{ @geo = Paperclip::Geometry.from_file(file) }
+      @geo.auto_orient
+      assert_equal 300, @geo.height
+      assert_equal 200, @geo.width
     end
 
     should "not generate from a bad file" do
       file = "/home/This File Does Not Exist.omg"
-      assert_raise(Paperclip::NotIdentifiedByImageMagickError){ @geo = Paperclip::Geometry.from_file(file) }
+      assert_raise(Paperclip::Errors::NotIdentifiedByImageMagickError){ @geo = Paperclip::Geometry.from_file(file) }
+    end
+
+    should "not generate from a blank filename" do
+      file = ""
+      assert_raise(Paperclip::Errors::NotIdentifiedByImageMagickError){ @geo = Paperclip::Geometry.from_file(file) }
+    end
+
+    should "not generate from a nil file" do
+      file = nil
+      assert_raise(Paperclip::Errors::NotIdentifiedByImageMagickError){ @geo = Paperclip::Geometry.from_file(file) }
+    end
+
+    should "not generate from a file with no path" do
+      file = mock("file", :path => "")
+      file.stubs(:respond_to?).with(:path).returns(true)
+      assert_raise(Paperclip::Errors::NotIdentifiedByImageMagickError){ @geo = Paperclip::Geometry.from_file(file) }
+    end
+
+    should "let us know when a command isn't found versus a processing error" do
+      old_path = ENV['PATH']
+      begin
+        ENV['PATH'] = ''
+        assert_raises(Paperclip::Errors::CommandNotFoundError) do
+          file = fixture_file("5k.png")
+          @geo = Paperclip::Geometry.from_file(file)
+        end
+      ensure
+        ENV['PATH'] = old_path
+      end
     end
 
     [['vertical',   900,  1440, true,  false, false, 1440, 900, 0.625],
@@ -170,6 +231,25 @@ class GeometryTest < Test::Unit::TestCase
 
         should "be able to return the correct crop transformation geometry #{args[3]}" do
           assert_equal args[3], @crop
+        end
+      end
+    end
+
+    [['256x256', {'150x150!' => [150, 150], '150x150#' => [150, 150], '150x150>' => [150, 150], '150x150<' => [256, 256], '150x150' => [150, 150]}],
+     ['256x256', {'512x512!' => [512, 512], '512x512#' => [512, 512], '512x512>' => [256, 256], '512x512<' => [512, 512], '512x512' => [512, 512]}],
+     ['600x400', {'512x512!' => [512, 512], '512x512#' => [512, 512], '512x512>' => [512, 341], '512x512<' => [600, 400], '512x512' => [512, 341]}]].each do |original_size, options|
+      options.each_pair do |size, dimensions|
+        context "#{original_size} resize_to #{size}" do
+          setup do
+            @source = Paperclip::Geometry.parse original_size
+            @new_geometry = @source.resize_to size
+          end
+          should "have #{dimensions.first} width" do
+            assert_equal dimensions.first, @new_geometry.width
+          end
+          should "have #{dimensions.last} height" do
+            assert_equal dimensions.last, @new_geometry.height
+          end
         end
       end
     end
