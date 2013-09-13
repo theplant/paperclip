@@ -203,6 +203,9 @@ module Paperclip
 
       def s3_interface
         @s3_interface ||= begin
+          if @s3_credentials[:region].present?
+            s3_host_name.replace "s3-#{@s3_credentials[:region]}.amazonaws.com"
+          end
           config = { :s3_endpoint => s3_host_name }
 
           if using_http_proxy?
@@ -221,16 +224,7 @@ module Paperclip
             config[opt] = s3_credentials[opt] if s3_credentials[opt]
           end
 
-          s3_instance = obtain_s3_instance_for(config.merge(@s3_options))
-
-          if @s3_credentials[:region].present?
-            begin
-              AWS::S3::DEFAULT_HOST.replace "s3-#{@s3_credentials[:region]}.amazonaws.com"
-            rescue
-            end
-          end
-
-          s3_instance
+          obtain_s3_instance_for(config.merge(@s3_options))
         end
       end
 
