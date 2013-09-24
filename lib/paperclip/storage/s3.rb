@@ -203,8 +203,8 @@ module Paperclip
 
       def s3_interface
         @s3_interface ||= begin
-          if @s3_credentials[:region].present?
-            s3_host_name.replace "s3-#{@s3_credentials[:region]}.amazonaws.com"
+          if s3_credentials && s3_credentials[:region].present?
+            s3_host_name.replace "s3-#{s3_credentials[:region]}.amazonaws.com"
           end
           config = { :s3_endpoint => s3_host_name }
 
