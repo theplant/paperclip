@@ -72,6 +72,7 @@ module Paperclip
           @s3_options     = @options[:s3_options]     || {}
           @s3_permissions = @options[:s3_permissions] || :public_read
           @s3_protocol    = @options[:s3_protocol]    || (@s3_permissions == :public_read ? 'http' : 'https')
+          @s3_protocol    = @s3_protocol.call(self) if @s3_protocol.is_a?(Proc)
           @s3_headers     = @options[:s3_headers]     || {}
           @s3_host_alias  = @options[:s3_host_alias]
           @s3_host_alias  = @s3_host_alias.call(self) if @s3_host_alias.is_a?(Proc)
